@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Play Against Atharva</title>
+
+  <!-- Load jQuery -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+  <!-- Load chess.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+  <!-- Load chessboard.js -->
+  <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+  <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f2f2f2;
+    }
+
+    header {
+      background-color: #333;
+      color: white;
+      padding: 15px;
+      text-align: center;
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: row;
+      justify-content: center;
+      padding: 20px;
+      gap: 30px;
+    }
+
+    #board {
+      width: 400px;
+    }
+
+    .right-panel {
+      width: 300px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 20px;
+    }
+
+    #status {
+      font-weight: bold;
+      font-size: 16px;
+    }
+
+    .status-red {
+      color: red;
+    }
+
+    #history {
+      font-family: monospace;
+      background-color: white;
+      border: 1px solid #ccc;
+      padding: 10px;
+      height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .highlight-square {
+      background-color: rgba(255, 255, 0, 0.6) !important;
+    }
+
+    button {
+      padding: 10px 15px;
+      font-size: 14px;
+      cursor: pointer;
+      background-color: #444;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      transition: background-color 0.2s;
+    }
+
+    button:hover {
+      background-color: #666;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    select {
+      padding: 8px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>Play Against Atharva "!!"</header>
+
+  <div class="container">
+    <div id="board"></div>
+
+    <div class="right-panel">
+      <div>
+        <label for="colorSelect">Choose side:</label>
+        <select id="colorSelect">
+          <option value="white">White</option>
+          <option value="black">Black</option>
+        </select>
+      </div>
+
+      <div id="status">Move: white</div>
+      <div id="history">Move history will appear here...</div>
+
+      <div class="button-row">
+        <button id="restartBtn">Restart</button>
+        <button id="undoBtn">Undo</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let game = new Chess();
+    let board;
+    let lastMoveSquares = [];
+    let playerColor = "white";
+
+    function highlightMove(from, to) {
+      removeHighlights();
+      $(`#board .square-${from}`).addClass('highlight-square');
+      $(`#board .square-${to}`).addClass('highlight-square');
+      lastMoveSquares = [from, to];
+    }
+
+    function removeHighlights() {
+      lastMoveSquares.forEach(sq => $(`#board .square-${sq}`).removeClass('highlight-square'));
+      lastMoveSquares = [];
+    }
+
+    function setStatus(msg, isError = false) {
+      const el = document.getElementById("status");
+      el.innerText = msg;
+      el.className = isError ? "status-red" : "";
+    }
+
+    function updateStatus() {
+      if (game.in_checkmate()) {
+        const msg = game.turn() === 'w' ? "Checkmate! Black wins." : "Checkmate! White wins.";
+        setStatus(msg, true);
+      } else if (game.in_draw()) {
+        setStatus("Draw!");
+      } else {
+        setStatus(game.turn() === 'w' ? "Move: white" : "Move: black");
+      }
+
+      const history = game.history();
+      let formatted = "";
+      for (let i = 0; i < history.length; i += 2) {
+        formatted += `${i / 2 + 1}. ${history[i]} ${history[i + 1] || ''}\n`;
+      }
+      document.getElementById("history").textContent = formatted.trim();
+    }
+
+    async function onDrop(source, target) {
+      if (game.game_over()) return 'snapback';
+
+      const move = game.move({ from: source, to: target, promotion: 'q' });
+      if (move === null) {
+        setStatus("Illegal move! Reverted...", true);
+        setTimeout(() => board.position(game.fen()), 1000);
+        return 'snapback';
+      }
+
+      highlightMove(source, target);
+      board.position(game.fen(), true);
+      updateStatus();
+
+      if (game.game_over()) return;
+
+      try {
+        const response = await fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fen: game.fen() })
+        });
+
+        const data = await response.json();
+        if (data.move && data.move.length === 4) {
+          const from = data.move.slice(0, 2);
+          const to = data.move.slice(2, 4);
+
+          game.move({ from, to, promotion: 'q' });
+          highlightMove(from, to);
+          board.position(game.fen(), true);
+          updateStatus();
+        } else {
+          setStatus("Bot error: " + (data.error || "Unknown issue"), true);
+        }
+      } catch (err) {
+        console.error(err);
+        setStatus("Error contacting bot backend.", true);
+      }
+    }
+
+    function initBoard() {
+      board = Chessboard('board', {
+        draggable: true,
+        position: 'start',
+        orientation: playerColor,
+        onDrop: onDrop,
+        pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+      });
+    }
+
+    document.getElementById("restartBtn").addEventListener("click", () => {
+      game = new Chess();
+      removeHighlights();
+      board.orientation(playerColor);
+      board.start();
+      updateStatus();
+    });
+
+    document.getElementById("undoBtn").addEventListener("click", () => {
+      game.undo(); // bot
+      game.undo(); // player
+      board.position(game.fen());
+      updateStatus();
+    });
+
+    document.getElementById("colorSelect").addEventListener("change", () => {
+      playerColor = document.getElementById("colorSelect").value;
+      game = new Chess();
+      removeHighlights();
+      board.orientation(playerColor);
+      board.start();
+      updateStatus();
+
+      if (playerColor === 'black') {
+        // Bot plays first
+        setTimeout(async () => {
+          try {
+            const response = await fetch("/predict", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ fen: game.fen() })
+            });
+
+            const data = await response.json();
+            if (data.move && data.move.length === 4) {
+              const from = data.move.slice(0, 2);
+              const to = data.move.slice(2, 4);
+              game.move({ from, to, promotion: 'q' });
+              highlightMove(from, to);
+              board.position(game.fen(), true);
+              updateStatus();
+            }
+          } catch (err) {
+            console.error(err);
+            setStatus("Error contacting bot backend.", true);
+          }
+        }, 300);
+      }
+    });
+
+    initBoard();
+    updateStatus();
+  </script>
+</body>
+</html>

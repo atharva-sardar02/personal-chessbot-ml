@@ -1,0 +1,23 @@
+# venv & OS
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Model/data artifacts
+*.pth
+*.pt
+*.pkl
+*.lock
+move_to_idx.json
+behavior_cloning_data.pt
+my_chess_games.json
+
+# Logs
+logs/
+*.log
